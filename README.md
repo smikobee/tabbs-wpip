@@ -1,3 +1,7 @@
+Please see the original Tabbs repo. This is the same extension, just with with an added PiP option in the sidebar. This is a feature I've always wanted in vertical tabs, so I had Claude add it in. All credits to eduard1414ed for such a great Chromium extension!
+
+https://github.com/eduard1414ed/tabbs
+
 # Tabbs
 
 A small extension for everyone who got used to tabs in Arc. Tabbs adds a side panel with favorites, folders and spaces.
