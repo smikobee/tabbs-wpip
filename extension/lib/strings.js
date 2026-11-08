@@ -42,6 +42,20 @@ const en = (app) => ({
     reset: 'Reset color',
   },
 
+  miniPlayer: {
+    label: 'Mini player',
+    back: 'Back to the tab',
+    play: 'Play',
+    pause: 'Pause',
+    rewind: 'Back 10 seconds',
+    forward: 'Forward 10 seconds',
+    mute: 'Mute the tab',
+    unmute: 'Unmute the tab',
+    close: 'Close the mini player',
+    seek: 'Go to this moment',
+    live: 'Live',
+  },
+
   menu: {
     rename: 'Rename',
     'change-icon': 'Change icon',
@@ -66,6 +80,8 @@ const en = (app) => ({
     welcome: 'Welcome & setup',
     'enable-spaces': 'Turn on spaces…',
     'disable-spaces': 'Turn off spaces…',
+    'enable-mini-player': 'Turn on mini player',
+    'disable-mini-player': 'Turn off mini player',
     'make-space': 'Make it a space',
     'make-folder': 'Make it a folder in…',
     'delete-space': 'Delete space',
@@ -276,6 +292,20 @@ const ru = (app) => ({
     reset: 'Сбросить цвет',
   },
 
+  miniPlayer: {
+    label: 'Мини-плеер',
+    back: 'Вернуться во вкладку',
+    play: 'Воспроизвести',
+    pause: 'Пауза',
+    rewind: 'Назад на 10 секунд',
+    forward: 'Вперёд на 10 секунд',
+    mute: 'Выключить звук вкладки',
+    unmute: 'Включить звук вкладки',
+    close: 'Закрыть мини-плеер',
+    seek: 'Перейти к этому моменту',
+    live: 'Эфир',
+  },
+
   menu: {
     rename: 'Переименовать',
     'change-icon': 'Сменить значок',
@@ -300,6 +330,8 @@ const ru = (app) => ({
     welcome: 'Приветствие и настройка',
     'enable-spaces': 'Включить пространства…',
     'disable-spaces': 'Выключить пространства…',
+    'enable-mini-player': 'Включить мини-плеер',
+    'disable-mini-player': 'Выключить мини-плеер',
     'make-space': 'Сделать пространством',
     'make-folder': 'Сделать папкой в…',
     'delete-space': 'Удалить пространство',

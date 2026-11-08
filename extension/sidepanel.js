@@ -78,6 +78,7 @@ import {
   showToast,
 } from './widgets.js';
 import { setUpDrag } from './drag.js';
+import { setUpMiniPlayer } from './mini-player.js';
 import {
   ROOT_ID_KEY,
   EXPANDED_KEY,
@@ -168,6 +169,9 @@ const treeEl = document.getElementById('tree');
 const openTabsEl = document.getElementById('open-tabs');
 const spacesEl = document.getElementById('spaces'); // the bar of space icons at the bottom
 document.title = S.appName;
+
+// The video of the tab you left, above the bar (stage 10, mini-player.js).
+const miniPlayer = setUpMiniPlayer({ S, before: spacesEl });
 
 const state = {
   rootId: null,
@@ -2010,7 +2014,7 @@ function menuTarget(node) {
     const tabId = Number(tab.dataset.tabId);
     return { kind: 'tab', wrap: tab, tabId, split: inSplit(state.tabs.get(tabId)) };
   }
-  return { kind: 'empty', spaces: state.spaceIds !== null };
+  return { kind: 'empty', spaces: state.spaceIds !== null, miniPlayer: miniPlayer.isEnabled() };
 }
 
 function runMenuItem(item, target) {
@@ -2090,6 +2094,12 @@ function runMenuItem(item, target) {
       break;
     case 'disable-spaces':
       disableSpaces();
+      break;
+    case 'enable-mini-player':
+      miniPlayer.turnOn();
+      break;
+    case 'disable-mini-player':
+      miniPlayer.turnOff();
       break;
     case 'welcome':
       openInNewTab(extensionUrl('welcome.html'), state.windowId)

@@ -9,7 +9,8 @@
 //   | { kind: 'tab', split } | { kind: 'pair' } (two tabs side by side below the divider)
 //   | { kind: 'space-folder', only } a space: its icon in the bar (stage 8);
 //     only: the last space (it can't be deleted or made a folder: turn spaces off instead)
-//   | { kind: 'empty', spaces } (empty space, the divider, "New tab"); spaces: spaces are on
+//   | { kind: 'empty', spaces, miniPlayer } (empty space, the divider, "New tab"); spaces: spaces are on;
+//     miniPlayer: the mini player is on (stage 10)
 // canPinCurrent — the selected tab can be pinned (it isn't a link's tab already).
 // Returns item ids in order, SEPARATOR between groups; `disabled` lists inactive ones.
 // Labels are in lib/strings.js (S.menu[id]).
@@ -49,7 +50,7 @@ export function menuItems(target, { canPinCurrent = false } = {}) {
       }
       break;
     case 'empty':
-      items = ['new-folder', 'pin-current', SEPARATOR, 'import-arc', target.spaces ? 'disable-spaces' : 'enable-spaces', 'welcome'];
+      items = ['new-folder', 'pin-current', SEPARATOR, 'import-arc', target.spaces ? 'disable-spaces' : 'enable-spaces', target.miniPlayer ? 'disable-mini-player' : 'enable-mini-player', 'welcome'];
       if (!canPinCurrent) disabled.add('pin-current');
       break;
     default:

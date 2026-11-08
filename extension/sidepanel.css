@@ -1214,3 +1214,243 @@ body.has-bar .toast {
     transition: none;
   }
 }
+
+/* ---------- Mini player (stage 10, mini-player.js)
+   As wide as the panel, as tall as the video's proportions allow: it grows with the panel. */
+
+.mini-player {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--panel-pad);
+  animation: mini-player-in var(--dur) ease;
+}
+
+.mini-player[hidden] {
+  display: none;
+}
+
+@keyframes mini-player-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+.mini-player-screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 60vh;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.mini-player-screen video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.mini-player-controls {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, .35);
+  opacity: 0;
+  transition: opacity var(--dur) ease;
+  pointer-events: none;
+}
+
+.mini-player-screen:hover .mini-player-controls,
+.mini-player-screen:focus-within .mini-player-controls,
+.mini-player.is-paused .mini-player-controls {
+  opacity: 1;
+}
+
+.mini-player-screen:hover .mini-player-controls > *,
+.mini-player-screen:focus-within .mini-player-controls > *,
+.mini-player.is-paused .mini-player-controls > * {
+  pointer-events: auto;
+}
+
+.mini-player-button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .45);
+  color: #fff;
+  cursor: pointer;
+}
+
+.mini-player-button[hidden] {
+  display: none;
+}
+
+.mini-player-button:hover {
+  background: rgba(0, 0, 0, .7);
+}
+
+.mini-player-button svg {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mini-player-button.is-play {
+  width: 40px;
+  height: 40px;
+}
+
+.mini-player-button.is-play svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mini-player-button.is-skip {
+  width: 30px;
+  height: 30px;
+}
+
+.mini-player-button.is-skip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mini-player-button.is-corner {
+  position: absolute;
+  top: 6px;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  transition: opacity var(--dur) ease;
+}
+
+.mini-player-button.is-corner svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mini-player-button.is-sound svg,
+.mini-player-button.is-close svg {
+  fill: none;
+}
+
+.mini-player-button.is-sound svg path {
+  fill: none;
+}
+
+.mini-player-button.is-sound {
+  left: 6px;
+}
+
+.mini-player-button.is-close {
+  right: 6px;
+}
+
+.mini-player-screen:hover .is-corner,
+.mini-player-screen:focus-within .is-corner {
+  opacity: 1;
+}
+
+.mini-player-time {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity var(--dur) ease;
+  pointer-events: none;
+}
+
+.mini-player-screen:hover .mini-player-time,
+.mini-player.is-paused .mini-player-time {
+  opacity: 1;
+}
+
+.mini-player-time:empty {
+  display: none;
+}
+
+.mini-player-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, .25);
+  transition: height var(--dur) ease;
+}
+
+.mini-player-progress[hidden] {
+  display: none;
+}
+
+.mini-player-screen:hover .mini-player-progress {
+  height: 5px;
+}
+
+.mini-player-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width .5s linear;
+}
+
+.mini-player-title {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-x);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--pad-x);
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+
+.mini-player-title:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.mini-player-favicon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.mini-player-favicon[hidden] {
+  display: none;
+}
+
+.mini-player-title-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-player { animation: none; }
+  .mini-player-bar { transition: none; }
+}
