@@ -1,5 +1,7 @@
 Please see the original Tabbs repo. This is the same extension, just with with an added PiP option in the sidebar. This is a feature I've always wanted in vertical tabs, so I had Claude add it in. All credits to eduard1414ed for such a great Chromium extension!
 
+<img width="2073" height="1668" alt="image" src="https://github.com/user-attachments/assets/b6131420-2e10-4cf0-9fcd-9c5f1277a6f2" />
+
 https://github.com/eduard1414ed/tabbs
 
 # Tabbs
