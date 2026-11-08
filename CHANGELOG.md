@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (Tabbs + PiP fork)
+
+- **Mini player**, off by default: leave a tab where a video is playing, and the video keeps showing at the bottom of the panel. It is as wide as the panel and grows with it. Click it to go back to the tab; play, pause, skip, seek and mute from the panel. It stays while the video is in its tab: another tab's video never replaces one that is playing, and if the connection drops it reconnects by itself. Turn it on with a right-click on empty space.
+- Named **Tabbs + PiP**, so it can be told apart from the Web Store version.
+
 ## 1.3.0 — 2026-10-27
 
 - The panel can take the color of Helium’s theme: click the eyedropper at the bottom of the panel, then the panel’s header. Text stays readable on any color. Light and dark themes keep a color each; right-click the eyedropper to reset it.

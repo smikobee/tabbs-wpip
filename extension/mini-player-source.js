@@ -4,60 +4,64 @@
 // panel over a local WebRTC connection (video.captureStream). Sound keeps playing in the tab,
 // the video keeps playing in the page: the panel only shows it and sends play / pause / seek.
 //
+// Sites swap their video element now and then (an ad, the next episode, a quality change): the
+// connection follows the new one by itself, so the player in the panel doesn't go away.
+//
 // Injected again every time you leave the tab: the second time only answers the probe.
 // The last expression of the file is what executeScript returns.
 
 (() => {
-  const PORT_NAME = 'tabbs-mini-player';
+  const PORT_NAME = 'tabbs-mini-player'; // lib/mini-player.js MINI_PLAYER_PORT
   const MIN_W = 200; // smaller videos are previews and ads, not what you were watching
   const MIN_H = 112;
   const STATUS_EVERY_MS = 500;
+  const FOLLOW_EVERY_MS = 1000;
 
   const isPlaying = (video) => !video.paused && !video.ended && video.readyState >= 2;
 
   function area(video) {
+    if (!video.isConnected) return 0;
     const rect = video.getBoundingClientRect();
     return rect.width >= MIN_W && rect.height >= MIN_H ? rect.width * rect.height : 0;
   }
 
   // The video you were watching: the largest playing one; not a muted looping background.
-  function pick() {
+  // any: a paused one will do too (the page has just reloaded, say), playing ones first.
+  function pick(any = false) {
     let best = null;
-    let bestArea = 0;
+    let bestScore = 0;
     for (const video of document.querySelectorAll('video')) {
-      if (!isPlaying(video) || (video.muted && video.loop)) continue;
+      if (video.muted && video.loop) continue;
+      const playing = isPlaying(video);
+      if (!playing && !(any && video.readyState >= 1)) continue;
       const size = area(video);
-      if (size > bestArea) {
+      if (!size) continue;
+      const score = size * (playing ? 4 : 1);
+      if (score > bestScore) {
         best = video;
-        bestArea = size;
+        bestScore = score;
       }
     }
-    return { video: best, area: bestArea };
+    return best;
   }
 
   if (!globalThis.__tabbsMiniPlayer) {
     let chosen = null; // WeakRef of the video found by the last probe
 
     function connect(port) {
-      const video = chosen?.deref();
-      if (!video || !video.isConnected) {
+      let video = chosen?.deref();
+      if (!video || !video.isConnected) video = pick(true);
+      if (!video) {
         port.postMessage({ type: 'gone' });
-        port.disconnect();
-        return;
-      }
-
-      let stream;
-      try {
-        stream = video.captureStream();
-      } catch (error) {
-        port.postMessage({ type: 'unsupported', reason: String(error?.message ?? error) });
         port.disconnect();
         return;
       }
 
       const pc = new RTCPeerConnection();
       let sender = null;
+      let stream = null;
       let width = 0; // what the panel shows, in device pixels: sent no larger
+      let closed = false;
 
       async function fitSize() {
         if (!sender || !width || !video.videoWidth) return;
@@ -69,45 +73,93 @@
         await sender.setParameters(parameters).catch(() => {});
       }
 
-      function addVideoTrack() {
-        const track = stream.getVideoTracks()[0];
+      function sendTrack() {
+        const track = stream?.getVideoTracks()[0];
         if (!track) return;
         if (sender) sender.replaceTrack(track).catch(() => {});
-        else sender = pc.addTrack(track, stream);
+        else sender = pc.addTrack(track);
         fitSize();
       }
-
-      // A new source (the next video, an ad) brings a new track.
-      stream.addEventListener('addtrack', addVideoTrack);
-      addVideoTrack();
-
-      pc.onicecandidate = ({ candidate }) => {
-        if (candidate) port.postMessage({ type: 'candidate', candidate: candidate.toJSON() });
-      };
 
       let lastStatus = 0;
       function status(force = false) {
         const now = Date.now();
-        if (!force && now - lastStatus < STATUS_EVERY_MS) return;
+        if (closed || (!force && now - lastStatus < STATUS_EVERY_MS)) return;
         lastStatus = now;
-        port.postMessage({
-          type: 'status',
-          paused: video.paused,
-          ended: video.ended,
-          currentTime: video.currentTime,
-          duration: Number.isFinite(video.duration) ? video.duration : null,
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-        });
+        try {
+          port.postMessage({
+            type: 'status',
+            paused: video.paused,
+            ended: video.ended,
+            currentTime: video.currentTime,
+            duration: Number.isFinite(video.duration) ? video.duration : null,
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+          });
+        } catch {}
       }
       const onTime = () => status();
       const onState = () => {
         status(true);
         fitSize();
       };
-      const events = ['play', 'pause', 'ended', 'seeked', 'loadedmetadata', 'resize', 'durationchange'];
-      video.addEventListener('timeupdate', onTime);
-      for (const name of events) video.addEventListener(name, onState);
+      const EVENTS = ['play', 'playing', 'pause', 'ended', 'seeked', 'loadedmetadata', 'resize', 'durationchange'];
+
+      function release() {
+        video.removeEventListener('timeupdate', onTime);
+        for (const name of EVENTS) video.removeEventListener(name, onState);
+        if (stream) {
+          stream.removeEventListener('addtrack', sendTrack);
+          // Stopping the copies doesn't stop the video itself.
+          for (const track of stream.getTracks()) track.stop();
+        }
+        stream = null;
+      }
+
+      // Capture `next` and send it in place of what was sent: the connection stays.
+      function bind(next) {
+        let nextStream;
+        try {
+          nextStream = next.captureStream();
+        } catch (error) {
+          return false; // DRM or another site's video without permission
+        }
+        release();
+        video = next;
+        stream = nextStream;
+        stream.addEventListener('addtrack', sendTrack); // a new source brings a new track
+        video.addEventListener('timeupdate', onTime);
+        for (const name of EVENTS) video.addEventListener(name, onState);
+        sendTrack();
+        status(true);
+        return true;
+      }
+
+      if (!bind(video)) {
+        port.postMessage({ type: 'unsupported' });
+        port.disconnect();
+        pc.close();
+        return;
+      }
+
+      // The page swapped its video: the one shown is gone or stopped while another one plays.
+      function follow() {
+        if (closed) return;
+        if (video.isConnected && isPlaying(video)) return;
+        const next = pick(!video.isConnected);
+        if (next && next !== video) bind(next);
+      }
+      const followTimer = setInterval(follow, FOLLOW_EVERY_MS);
+      const onAnyPlay = (event) => {
+        if (event.target instanceof HTMLVideoElement && event.target !== video) follow();
+      };
+      document.addEventListener('playing', onAnyPlay, true); // media events don't bubble, but are captured
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate && !closed) {
+          try { port.postMessage({ type: 'candidate', candidate: candidate.toJSON() }); } catch {}
+        }
+      };
 
       port.onMessage.addListener(async (message) => {
         try {
@@ -150,20 +202,24 @@
       });
 
       port.onDisconnect.addListener(() => {
-        video.removeEventListener('timeupdate', onTime);
-        for (const name of events) video.removeEventListener(name, onState);
-        stream.removeEventListener('addtrack', addVideoTrack);
+        closed = true;
+        clearInterval(followTimer);
+        document.removeEventListener('playing', onAnyPlay, true);
+        release();
         pc.close();
-        // Stopping the copies doesn't stop the video itself.
-        for (const track of stream.getTracks()) track.stop();
       });
     }
 
     globalThis.__tabbsMiniPlayer = {
-      probe() {
-        const { video, area: size } = pick();
+      probe(any = false) {
+        const video = pick(any);
         chosen = video ? new WeakRef(video) : null;
-        return { playing: Boolean(video), area: size, muted: Boolean(video?.muted) };
+        return {
+          found: Boolean(video),
+          playing: Boolean(video && isPlaying(video)),
+          area: video ? area(video) : 0,
+          muted: Boolean(video?.muted),
+        };
       },
     };
 

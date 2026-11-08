@@ -7,19 +7,28 @@
 // computer). Sound stays in the tab. The player is as wide as the panel and keeps the video's
 // proportions, so it grows when the panel is made wider; the page is told the new width and
 // sends a sharper picture.
+//
+// It stays as long as the video is in its tab: it goes away when you come back to that tab,
+// close it or click ×. Another tab's video never takes the place of one that is playing. When
+// the connection drops (the page reloaded or swapped its video, the browser hiccuped), the last
+// picture stays and the panel connects again by itself; only a tab with no video left loses it.
 
 import {
   MINI_PLAYER_KEY,
   MINI_PLAYER_ORIGINS,
   MINI_PLAYER_PORT,
+  GIVE_UP_AFTER_MS,
   canInject,
   pickFrame,
   onSelected,
+  isPlayingStatus,
+  reconnectDelay,
   formatTime,
 } from './lib/mini-player.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const FIRST_FRAME_MS = 4000; // no picture by then — the page can't share this video
+const FIRST_FRAME_MS = 8000; // no picture by then — the page can't share this video
+const DISCONNECTED_GRACE_MS = 3000; // WebRTC often comes back from "disconnected" by itself
 const SKIP_SECONDS = 10;
 
 const ICONS = {
@@ -70,11 +79,9 @@ export function setUpMiniPlayer({ S, before }) {
 
   const screen = el('div', 'mini-player-screen');
   screen.title = T.back;
-  const video = el('video');
-  video.muted = true; // the sound plays in the tab
-  video.autoplay = true;
-  video.playsInline = true;
-  video.disablePictureInPicture = true;
+  // While the panel connects again: the last picture, so the player doesn't go blank.
+  const freezeEl = el('canvas', 'mini-player-freeze');
+  freezeEl.hidden = true;
 
   const controls = el('div', 'mini-player-controls');
   const rewindEl = button('is-skip', T.rewind, 'rewind');
@@ -91,7 +98,7 @@ export function setUpMiniPlayer({ S, before }) {
   progressEl.append(barEl);
   progressEl.title = T.seek;
 
-  screen.append(video, controls, soundEl, closeEl, timeEl, progressEl);
+  screen.append(freezeEl, controls, soundEl, closeEl, timeEl, progressEl);
 
   const titleEl = el('button', 'mini-player-title');
   titleEl.type = 'button';
@@ -109,79 +116,87 @@ export function setUpMiniPlayer({ S, before }) {
   let windowId;
   let enabled = false;
   let lastActive = null; // the selected tab of this window
-  let session = null; // what is shown: { tabId, port, pc, status }
-  let generation = 0; // a newer start or stop cancels one under way
+
+  // What is shown: { tabId, conn, status, lostAt, retry, retryTimer } — conn null while it
+  // connects again. A connection: { tabId, port, pc, video, shown, post, close }.
+  let session = null;
+  let pending = null; // a connection to another tab's video, until its first picture
+  let probeToken = 0; // a newer look into a tab cancels one under way
 
   const showing = () => session?.tabId ?? null;
 
-  function stop() {
-    generation++;
-    if (!session) return;
-    const { port, pc, timer } = session;
-    session = null;
-    clearTimeout(timer);
-    try { port.disconnect(); } catch {}
-    pc.close();
-    video.srcObject = null;
-    root.hidden = true;
-    root.classList.remove('is-paused');
+  function newVideo() {
+    const video = el('video', 'is-pending');
+    video.muted = true; // the sound plays in the tab
+    video.autoplay = true;
+    video.playsInline = true;
+    video.disablePictureInPicture = true;
+    screen.prepend(video);
+    return video;
   }
 
   // Width in device pixels: the page sends no sharper picture than that.
   const pixelWidth = () => Math.round((screen.clientWidth || document.body.clientWidth) * devicePixelRatio);
 
-  async function tryStart(tabId) {
-    const token = ++generation;
-    let tab;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch {
-      return; // closed
-    }
-    if (!canInject(tab.url) || tab.discarded) return;
-
-    let results = [];
-    try {
-      results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['mini-player-source.js'] });
-    } catch (error) {
-      console.debug('Mini player: no access to the tab', tabId, error);
-      return;
-    }
-    const frame = pickFrame(results);
-    if (!frame || token !== generation) return;
-    if (tabId === lastActive) return; // back already
-    open(tab, frame.frameId);
-  }
-
-  function open(tab, frameId) {
-    stop();
-    const token = generation;
-    const port = chrome.tabs.connect(tab.id, { name: MINI_PLAYER_PORT, frameId });
+  // A connection to the video in a frame of a tab. onFirst — its first picture came;
+  // onLost — it couldn't start or it broke.
+  function connectTo(tabId, frameId, { onFirst, onLost }) {
+    const port = chrome.tabs.connect(tabId, { name: MINI_PLAYER_PORT, frameId });
     const pc = new RTCPeerConnection();
-    const current = { tabId: tab.id, port, pc, status: null, timer: 0, shown: false };
-    session = current;
-    const alive = () => session === current && token === generation;
+    const video = newVideo();
+    const conn = { tabId, port, pc, video, shown: false, closed: false };
+    let graceTimer = 0;
 
-    current.timer = setTimeout(() => {
-      if (alive() && !current.shown) stop(); // the page can't share this video
+    const post = (message) => {
+      if (conn.closed) return;
+      try { port.postMessage(message); } catch {}
+    };
+    conn.post = post;
+    conn.close = () => {
+      if (conn.closed) return;
+      conn.closed = true;
+      clearTimeout(firstTimer);
+      clearTimeout(graceTimer);
+      try { port.disconnect(); } catch {}
+      pc.close();
+      video.srcObject = null;
+      video.remove();
+    };
+    const lost = (why) => {
+      if (conn.closed) return;
+      console.debug('Mini player: connection lost', tabId, why);
+      const wasShown = conn.shown;
+      onLost(conn, wasShown);
+    };
+
+    const firstTimer = setTimeout(() => {
+      if (!conn.shown) lost('no picture');
     }, FIRST_FRAME_MS);
 
     pc.ontrack = ({ track, streams }) => {
-      if (!alive()) return;
+      if (conn.closed) return;
       video.srcObject = streams[0] ?? new MediaStream([track]);
       video.play().catch(() => {});
     };
     pc.onicecandidate = ({ candidate }) => {
-      if (candidate && alive()) post({ type: 'candidate', candidate: candidate.toJSON() });
+      if (candidate) post({ type: 'candidate', candidate: candidate.toJSON() });
     };
-
-    function post(message) {
-      try { port.postMessage(message); } catch {}
-    }
-    current.post = post;
+    pc.onconnectionstatechange = () => {
+      clearTimeout(graceTimer);
+      if (pc.connectionState === 'failed') lost('failed');
+      else if (pc.connectionState === 'disconnected') {
+        graceTimer = setTimeout(() => pc.connectionState !== 'connected' && lost('disconnected'), DISCONNECTED_GRACE_MS);
+      }
+    };
+    video.addEventListener('loadeddata', () => {
+      if (conn.closed || conn.shown) return;
+      conn.shown = true;
+      clearTimeout(firstTimer);
+      onFirst(conn);
+    });
 
     port.onMessage.addListener(async (message) => {
-      if (!alive()) return;
+      if (conn.closed) return;
       try {
         switch (message?.type) {
           case 'offer':
@@ -193,12 +208,15 @@ export function setUpMiniPlayer({ S, before }) {
             await pc.addIceCandidate(message.candidate);
             break;
           case 'status':
-            current.status = message;
-            applyStatus();
+            conn.status = message;
+            if (session?.conn === conn) {
+              session.status = message;
+              applyStatus();
+            }
             break;
           case 'gone':
           case 'unsupported':
-            stop();
+            lost(message.type);
             break;
         }
       } catch (error) {
@@ -206,22 +224,166 @@ export function setUpMiniPlayer({ S, before }) {
       }
     });
     port.onDisconnect.addListener(() => {
-      void chrome.runtime.lastError; // the tab navigated away or closed
-      if (session === current) stop();
+      void chrome.runtime.lastError; // the page reloaded, went away or the tab closed
+      lost('port');
     });
 
-    applyTab(tab);
     post({ type: 'start', width: pixelWidth() });
+    return conn;
   }
 
-  // The first picture: the player appears.
-  video.addEventListener('loadeddata', () => {
-    if (!session || session.shown) return;
-    session.shown = true;
-    clearTimeout(session.timer);
+  // The connection's picture becomes the one shown.
+  function showConn(conn) {
+    for (const old of screen.querySelectorAll('video')) {
+      if (old !== conn.video) old.classList.add('is-pending');
+    }
+    conn.video.classList.remove('is-pending');
+    freezeEl.hidden = true;
     root.hidden = false;
-    session.post({ type: 'width', width: pixelWidth() });
-  });
+    conn.post({ type: 'width', width: pixelWidth() });
+  }
+
+  function stop() {
+    probeToken++;
+    pending?.close();
+    pending = null;
+    if (session) {
+      clearTimeout(session.retryTimer);
+      session.conn?.close();
+      session = null;
+    }
+    freezeEl.hidden = true;
+    root.hidden = true;
+    root.classList.remove('is-paused');
+  }
+
+  // A video found in a tab you left: shown once its first picture comes. Until then what is
+  // shown stays (if anything); if it never comes, nothing changes.
+  function offer(tab, frameId) {
+    pending?.close();
+    const conn = connectTo(tab.id, frameId, {
+      onFirst(conn) {
+        if (pending !== conn) return conn.close();
+        pending = null;
+        if (tab.id === lastActive) return conn.close(); // you came back meanwhile
+        if (session) {
+          clearTimeout(session.retryTimer);
+          session.conn?.close();
+        }
+        session = { tabId: tab.id, conn, status: conn.status ?? null, lostAt: 0, retry: 0, retryTimer: 0 };
+        applyTab(tab);
+        applyStatus();
+        showConn(conn);
+      },
+      onLost(conn, wasShown) {
+        if (session?.conn === conn) sessionLost(wasShown);
+        else conn.close();
+        if (pending === conn) pending = null;
+      },
+    });
+    pending = conn;
+  }
+
+  // The shown video's connection broke: keep its last picture and get it back.
+  function sessionLost() {
+    const conn = session.conn;
+    freeze(conn.video);
+    conn.close();
+    session.conn = null;
+    if (!session.lostAt) session.lostAt = Date.now();
+    session.retry = 0;
+    scheduleReconnect();
+  }
+
+  function freeze(video) {
+    if (!video?.videoWidth) return;
+    freezeEl.width = video.videoWidth;
+    freezeEl.height = video.videoHeight;
+    try {
+      freezeEl.getContext('2d').drawImage(video, 0, 0);
+      freezeEl.hidden = false;
+    } catch {}
+  }
+
+  function scheduleReconnect(delay = reconnectDelay(session.retry)) {
+    clearTimeout(session.retryTimer);
+    const current = session;
+    current.retryTimer = setTimeout(() => reconnect(current), delay);
+  }
+
+  async function reconnect(current) {
+    if (session !== current || current.conn) return;
+    let tab;
+    try {
+      tab = await chrome.tabs.get(current.tabId);
+    } catch {
+      if (session === current) stop(); // closed
+      return;
+    }
+    if (session !== current) return;
+    if (tab.active && tab.windowId === windowId) return stop(); // you're back in it
+    const frame = tab.discarded || !canInject(tab.url) ? null : await findVideo(tab.id, { any: true });
+    if (session !== current || current.conn) return;
+    if (!frame) {
+      // No video there (yet): the page may still be loading. Only a tab that stays without one loses the player.
+      if (Date.now() - current.lostAt > GIVE_UP_AFTER_MS) return stop();
+      current.retry++;
+      return scheduleReconnect();
+    }
+    current.conn = connectTo(tab.id, frame.frameId, {
+      onFirst(conn) {
+        if (session !== current || current.conn !== conn) return conn.close();
+        current.lostAt = 0;
+        current.retry = 0;
+        current.status = conn.status ?? current.status;
+        applyTab(tab);
+        applyStatus();
+        showConn(conn);
+      },
+      onLost(conn) {
+        conn.close();
+        if (session !== current || current.conn !== conn) return;
+        current.conn = null;
+        if (Date.now() - current.lostAt > GIVE_UP_AFTER_MS) return stop();
+        current.retry++;
+        scheduleReconnect();
+      },
+    });
+  }
+
+  // The frame of the tab with the best video, or null. any: a paused one will do.
+  async function findVideo(tabId, { any = false, withSound = false } = {}) {
+    try {
+      let results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['mini-player-source.js'] });
+      if (any) {
+        results = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: () => globalThis.__tabbsMiniPlayer?.probe(true) ?? null,
+        });
+      }
+      return pickFrame(results, { any, withSound });
+    } catch (error) {
+      console.debug('Mini player: no access to the tab', tabId, error);
+      return null;
+    }
+  }
+
+  // You left a tab: is a video playing there?
+  async function probe(tabId) {
+    const token = ++probeToken;
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      return; // closed
+    }
+    if (!canInject(tab.url) || tab.discarded) return;
+    // A paused video shown may give its place only to one with sound, not to a muted preview.
+    const frame = await findVideo(tabId, { withSound: session !== null });
+    if (!frame || token !== probeToken || tabId === lastActive) return;
+    if (session && isPlayingStatus(session.status)) return; // it started playing again meanwhile
+    offer(tab, frame.frameId);
+  }
 
   // ---------- Showing
 
@@ -259,7 +421,7 @@ export function setUpMiniPlayer({ S, before }) {
   let widthTimer = 0;
   new ResizeObserver(() => {
     clearTimeout(widthTimer);
-    widthTimer = setTimeout(() => session?.post?.({ type: 'width', width: pixelWidth() }), 150);
+    widthTimer = setTimeout(() => session?.conn?.post({ type: 'width', width: pixelWidth() }), 150);
   }).observe(screen);
 
   // ---------- Controls
@@ -279,11 +441,10 @@ export function setUpMiniPlayer({ S, before }) {
   titleEl.addEventListener('click', backToTab);
   closeEl.addEventListener('click', stop);
   playEl.addEventListener('click', () => {
-    const status = session?.status;
-    session?.post({ type: status?.paused || status?.ended ? 'play' : 'pause' });
+    session?.conn?.post({ type: isPlayingStatus(session.status) ? 'pause' : 'play' });
   });
-  rewindEl.addEventListener('click', () => session?.post({ type: 'skip', seconds: -SKIP_SECONDS }));
-  forwardEl.addEventListener('click', () => session?.post({ type: 'skip', seconds: SKIP_SECONDS }));
+  rewindEl.addEventListener('click', () => session?.conn?.post({ type: 'skip', seconds: -SKIP_SECONDS }));
+  forwardEl.addEventListener('click', () => session?.conn?.post({ type: 'skip', seconds: SKIP_SECONDS }));
   soundEl.addEventListener('click', () => {
     const tabId = showing();
     if (tabId === null) return;
@@ -292,29 +453,51 @@ export function setUpMiniPlayer({ S, before }) {
   });
   progressEl.addEventListener('click', (event) => {
     const rect = progressEl.getBoundingClientRect();
-    session?.post({ type: 'seek', fraction: (event.clientX - rect.left) / rect.width });
+    session?.conn?.post({ type: 'seek', fraction: (event.clientX - rect.left) / rect.width });
   });
 
   // ---------- Tabs
 
   chrome.tabs.onActivated.addListener(({ tabId, windowId: inWindow }) => {
+    if (pending?.tabId === tabId) {
+      pending.close();
+      pending = null;
+    }
+    if (tabId === showing()) {
+      stop(); // back in the video's tab (in this window or another)
+      if (inWindow === windowId) lastActive = tabId;
+      return;
+    }
     if (inWindow !== windowId) return;
     const previous = lastActive;
     lastActive = tabId;
-    const action = onSelected({ selected: tabId, previous, showing: showing(), enabled });
-    if (action === 'stop') stop();
-    else if (action === 'start') tryStart(previous);
+    const action = onSelected({ selected: tabId, previous, showing: showing(), showingPlaying: isPlayingStatus(session?.status), enabled });
+    if (action === 'probe') probe(previous);
   });
   chrome.tabs.onRemoved.addListener((tabId) => {
     if (tabId === showing()) stop();
+    if (pending?.tabId === tabId) {
+      pending.close();
+      pending = null;
+    }
     if (tabId === lastActive) lastActive = null;
   });
   chrome.tabs.onReplaced.addListener((added, removed) => {
-    if (removed === showing()) stop();
     if (removed === lastActive) lastActive = added;
+    if (session?.tabId === removed) {
+      // Same page under a new id (prerendering, a restored tab): follow it.
+      session.tabId = added;
+      session.conn?.close();
+      session.conn = null;
+      if (!session.lostAt) session.lostAt = Date.now();
+      scheduleReconnect(0);
+    }
   });
   chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (tabId === showing() && ('title' in info || 'favIconUrl' in info || 'mutedInfo' in info)) applyTab(tab);
+    if (tabId !== showing()) return;
+    if ('title' in info || 'favIconUrl' in info || 'mutedInfo' in info) applyTab(tab);
+    if (info.status === 'complete' && !session.conn) scheduleReconnect(0); // reloaded: try at once
+    if (info.discarded) stop(); // the browser unloaded the tab: no video left
   });
 
   // ---------- On and off

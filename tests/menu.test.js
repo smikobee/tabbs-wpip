@@ -47,9 +47,10 @@ test('folder: "Открыть всё" needs a link without a tab, "Закрыт�
 
 test('tab below the divider and empty space', () => {
   assert.deepEqual(menuItems({ kind: 'tab' }).items, ['pin-tab', 'close-tab']);
-  assert.deepEqual(menuItems({ kind: 'empty' }, { canPinCurrent: true }).items, ['new-folder', 'pin-current', SEPARATOR, 'import-arc', 'enable-spaces', 'welcome']);
+  assert.deepEqual(menuItems({ kind: 'empty' }, { canPinCurrent: true }).items, ['new-folder', 'pin-current', SEPARATOR, 'import-arc', 'enable-spaces', 'enable-mini-player', 'welcome']);
   assert.ok(menuItems({ kind: 'empty' }).disabled.has('pin-current'));
   assert.deepEqual(menuItems({ kind: 'empty', spaces: true }).items.slice(3, 5), ['import-arc', 'disable-spaces']);
+  assert.equal(menuItems({ kind: 'empty', miniPlayer: true }).items[5], 'disable-mini-player');
 });
 
 test('split view: a pair below the divider and a link whose tab is in a pair', () => {

@@ -1247,11 +1247,24 @@ body.has-bar .toast {
   cursor: pointer;
 }
 
-.mini-player-screen video {
+.mini-player-screen video,
+.mini-player-freeze {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* A connection still starting, under the picture shown. */
+.mini-player-screen video.is-pending {
+  opacity: 0;
+}
+
+/* The last picture while the panel connects again. */
+.mini-player-freeze[hidden] {
+  display: none;
 }
 
 .mini-player-controls {
