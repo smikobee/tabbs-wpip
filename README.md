@@ -2,6 +2,8 @@ Please see the original Tabbs repo. This is the same extension, just with with a
 
 <img width="2073" height="1668" alt="image" src="https://github.com/user-attachments/assets/b6131420-2e10-4cf0-9fcd-9c5f1277a6f2" />
 
+To enable it, right-click the Tabbs sidebar and select 'Turn on miniplayer'
+
 https://github.com/eduard1414ed/tabbs
 
 # Tabbs
