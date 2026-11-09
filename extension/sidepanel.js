@@ -171,7 +171,45 @@ const spacesEl = document.getElementById('spaces'); // the bar of space icons at
 document.title = S.appName;
 
 // The video of the tab you left, above the bar (stage 10, mini-player.js).
-const miniPlayer = setUpMiniPlayer({ S, before: spacesEl });
+const miniPlayer = setUpMiniPlayer({ S, before: spacesEl, onResize: (grownBy) => grownBy > 0 && keepActiveInView(grownBy) });
+
+// The selected tab is never left under the bottom edge of the list, where the mini player is:
+// when the player appears or grows, and when another tab gets selected (a new tab at the end of
+// a full list), with "+ New tab" under the last tab. Only a tab just past the edge is brought up — one far away, or above, isn't, so
+// your own scrolling stays as it was.
+let activeKey = null; // which row was selected: a re-render of the same one changes nothing
+
+function keepActiveInView(grownBy = 0) {
+  // You were at the very end of the list (on "+ New tab"): it stays at the end.
+  if (grownBy > 0 && listEl.scrollTop + listEl.clientHeight + grownBy >= listEl.scrollHeight - 2) {
+    listEl.scrollTop = listEl.scrollHeight;
+    return;
+  }
+  const row = listEl.querySelector('.is-active > .row');
+  if (!row) return;
+  const list = listEl.getBoundingClientRect();
+  const rect = row.getBoundingClientRect();
+  const reach = Math.max(grownBy, miniPlayer?.height() ?? 0, rect.height);
+  // The last tab: "+ New tab" under it comes into view too.
+  const newTabRect = listEl.querySelector('.new-tab-row')?.getBoundingClientRect();
+  const bottom = newTabRect && newTabRect.top >= rect.bottom && newTabRect.top - rect.bottom < rect.height
+    ? newTabRect.bottom
+    : rect.bottom;
+  if (bottom > list.bottom && rect.top < list.bottom + reach) listEl.scrollTop += bottom - list.bottom + 4;
+}
+
+let activeCheck = 0;
+new MutationObserver(() => {
+  if (activeCheck) return;
+  activeCheck = requestAnimationFrame(() => {
+    activeCheck = 0;
+    const wrap = listEl.querySelector('.is-active');
+    const key = wrap ? `${wrap.dataset.id ?? ''}|${wrap.dataset.tabId ?? ''}` : null;
+    if (key === activeKey) return;
+    activeKey = key;
+    keepActiveInView();
+  });
+}).observe(listEl, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
 
 const state = {
   rootId: null,

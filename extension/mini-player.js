@@ -67,8 +67,9 @@ function button(className, label, iconName) {
   return node;
 }
 
-// S — the panel's texts (S.miniPlayer); before — the element the player goes above.
-export function setUpMiniPlayer({ S, before }) {
+// S — the panel's texts (S.miniPlayer); before — the element the player goes above;
+// onResize(grownBy) — the player appeared, went or changed height (the list above got shorter or taller).
+export function setUpMiniPlayer({ S, before, onResize = () => {} }) {
   const T = S.miniPlayer;
 
   // ---------- Elements
@@ -417,6 +418,16 @@ export function setUpMiniPlayer({ S, before }) {
     soundEl.dataset.muted = String(muted);
   }
 
+  // The list above gets shorter as the player appears or grows: the panel keeps the selected tab in view.
+  let height = 0;
+  new ResizeObserver(() => {
+    const next = root.hidden ? 0 : root.offsetHeight;
+    if (next === height) return;
+    const grownBy = next - height;
+    height = next;
+    onResize(grownBy);
+  }).observe(root);
+
   // The player is as wide as the panel: a wider panel asks for a sharper picture.
   let widthTimer = 0;
   new ResizeObserver(() => {
@@ -525,6 +536,7 @@ export function setUpMiniPlayer({ S, before }) {
 
   return {
     isEnabled: () => enabled,
+    height: () => height,
     // From a click (the menu): the permission prompt needs it, so it is asked at once.
     turnOn() {
       return chrome.permissions.request({ origins: MINI_PLAYER_ORIGINS })
